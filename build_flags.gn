@@ -1,0 +1,4 @@
+is_component_build=false
+is_debug=false
+target_os = "android"
+target_cpu = "arm64"

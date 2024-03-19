@@ -1,0 +1,140 @@
+From fdd7d1c08937b7779469e561b2c5de617788eaaf Mon Sep 17 00:00:00 2001
+From: Gnanasekar Somanathan <gnanasekar.somanathan@gmail.com>
+Date: Tue, 19 Mar 2024 14:03:32 +0530
+Subject: [PATCH] added new App menu id "New Google tab" for chrome on android
+
+Introduces basic UI changes to add a new app menu id which will
+load google page in a new tab with blue background color.
+
+This patch also enables allowing injecting script for android and
+the script injection method is used for applying blue background
+color for the New google tab in
+TabObserver.onDidFinishNavigationInPrimaryMainFrame.
+---
+ chrome/android/java/res/menu/main_menu.xml    |  9 +++++++
+ .../chrome/browser/ChromeTabbedActivity.java  | 24 +++++++++++++++++++
+ chrome/browser/chrome_browser_main_android.cc |  6 +++++
+ chrome/browser/chrome_browser_main_android.h  |  1 +
+ .../strings/android_chrome_strings.grd        |  3 +++
+ 5 files changed, 43 insertions(+)
+
+diff --git a/chrome/android/java/res/menu/main_menu.xml b/chrome/android/java/res/menu/main_menu.xml
+index f58ab1d007..264a3c91e3 100644
+--- a/chrome/android/java/res/menu/main_menu.xml
++++ b/chrome/android/java/res/menu/main_menu.xml
+@@ -43,6 +43,9 @@ found in the LICENSE file.
+         <item android:id="@+id/new_tab_menu_id"
+             android:title="@string/menu_new_tab"
+             android:icon="@drawable/ic_add_box_rounded_corner" />
++        <item android:id="@+id/new_google_tab_menu_id"
++            android:title="@string/menu_new_google_tab"
++            android:icon="@drawable/ic_google_services_48dp" />
+         <item android:id="@+id/new_incognito_tab_menu_id"
+             android:title="@string/menu_new_incognito_tab"
+             android:icon="@drawable/incognito_simple" />
+@@ -171,6 +174,9 @@ found in the LICENSE file.
+         <item android:id="@id/new_tab_menu_id"
+             android:title="@string/menu_new_tab"
+             android:icon="@drawable/ic_add_box_rounded_corner" />
++        <item android:id="@id/new_google_tab_menu_id"
++            android:title="@string/menu_new_google_tab"
++            android:icon="@drawable/ic_google_services_48dp" />
+         <item android:id="@id/new_incognito_tab_menu_id"
+             android:title="@string/menu_new_incognito_tab"
+             android:icon="@drawable/incognito_simple" />
+@@ -197,6 +203,9 @@ found in the LICENSE file.
+         <item android:id="@id/new_tab_menu_id"
+             android:title="@string/menu_new_tab"
+             android:icon="@drawable/ic_add_box_rounded_corner" />
++        <item android:id="@id/new_google_tab_menu_id"
++            android:title="@string/menu_new_google_tab"
++            android:icon="@drawable/ic_google_services_48dp" />
+         <item android:id="@id/new_incognito_tab_menu_id"
+             android:title="@string/menu_new_incognito_tab"
+             android:icon="@drawable/incognito_simple" />
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+index 01c85c2639..a2128861b6 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+@@ -2224,6 +2224,30 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
+                         TrackerFactory.getTrackerForProfile(Profile.getLastUsedRegularProfile());
+                 tracker.notifyEvent(EventConstants.APP_MENU_NEW_INCOGNITO_TAB_CLICKED);
+             }
++        } else if (id == R.id.new_google_tab_menu_id) {
++            if (!mTabModelSelector.isTabStateInitialized()) return false;
++
++            getTabModelSelector().getModel(false).commitAllTabClosures();
++            RecordUserAction.record("MobileMenuNewGoogleTab");
++            RecordUserAction.record("MobileNewGoogleTabOpened");
++            if (fromMenu) RecordUserAction.record("MobileMenuNewGoogleTab.AppMenu");
++
++            Tab tab = getTabCreator(false).launchUrl(UrlConstants.GOOGLE_URL, TabLaunchType.FROM_CHROME_UI);
++            tab.addObserver(new EmptyTabObserver() {
++                @Override
++                public void onDidFinishNavigationInPrimaryMainFrame(Tab tab, NavigationHandle navigationHandle) {
++                    tab.removeObserver(this);
++                    tab.getWebContents()
++                       .evaluateJavaScript(
++                            "(function() {"
++                                +   "var styleElement = document.createElement('style');"
++                                +   "var cssCode = 'body, div, html { background-color: blue !important; }';"
++                                +   "styleElement.appendChild(document.createTextNode(cssCode));"
++                                +   "document.head.appendChild(styleElement);"
++                                + "})()",
++                            null);
++                }
++            });
+         } else if (id == R.id.all_bookmarks_menu_id) {
+             // Note that 'currentTab' could be null in overview mode when start surface is
+             // enabled.
+diff --git a/chrome/browser/chrome_browser_main_android.cc b/chrome/browser/chrome_browser_main_android.cc
+index 893a48b0c6..2f2161fa1e 100644
+--- a/chrome/browser/chrome_browser_main_android.cc
++++ b/chrome/browser/chrome_browser_main_android.cc
+@@ -23,6 +23,7 @@
+ #include "components/metrics/stability_metrics_helper.h"
+ #include "content/public/browser/android/compositor.h"
+ #include "content/public/browser/browser_thread.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/common/main_function_params.h"
+ #include "device/fido/features.h"
+ #include "net/base/network_change_notifier.h"
+@@ -103,3 +104,8 @@ void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
+ void ChromeBrowserMainPartsAndroid::ShowMissingLocaleMessageBox() {
+   NOTREACHED();
+ }
++
++int ChromeBrowserMainPartsAndroid::PreMainMessageLoopRun() {
++  content::RenderFrameHost::AllowInjectingJavaScript();
++  return ChromeBrowserMainParts::PreMainMessageLoopRun();
++}
+\ No newline at end of file
+diff --git a/chrome/browser/chrome_browser_main_android.h b/chrome/browser/chrome_browser_main_android.h
+index 797b64f57b..3e5ee5fbf7 100644
+--- a/chrome/browser/chrome_browser_main_android.h
++++ b/chrome/browser/chrome_browser_main_android.h
+@@ -36,6 +36,7 @@ class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
+   // ChromeBrowserMainParts overrides.
+   void PostBrowserStart() override;
+   void ShowMissingLocaleMessageBox() override;
++  int PreMainMessageLoopRun() override;
+ 
+  private:
+   std::unique_ptr<crash_reporter::ChildExitObserver> child_exit_observer_;
+diff --git a/chrome/browser/ui/android/strings/android_chrome_strings.grd b/chrome/browser/ui/android/strings/android_chrome_strings.grd
+index 6781a4c6d1..2c4b9bfb38 100644
+--- a/chrome/browser/ui/android/strings/android_chrome_strings.grd
++++ b/chrome/browser/ui/android/strings/android_chrome_strings.grd
+@@ -3793,6 +3793,9 @@ To change this setting, <ph name="BEGIN_LINK">&lt;resetlink&gt;</ph>reset sync<p
+       <message name="IDS_MENU_NEW_TAB" desc="Menu item for opening a new tab. [CHAR_LIMIT=27]">
+         New tab
+       </message>
++      <message name="IDS_MENU_NEW_GOOGLE_TAB" desc="Menu item for opening a new tab. [CHAR_LIMIT=27]">
++        New Google tab
++      </message>
+       <message name="IDS_MENU_NEW_INCOGNITO_TAB" desc="Menu item for opening a new Incognito tab that facilitates pseudononymous browsing. [CHAR_LIMIT=27]" meaning="Android menu">
+         New Incognito tab
+       </message>
+-- 
+2.43.0
+

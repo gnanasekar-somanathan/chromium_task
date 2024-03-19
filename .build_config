@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+#all=all
+
+chromium_version=119.0.6045.199
